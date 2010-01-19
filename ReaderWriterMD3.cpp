@@ -1,4 +1,15 @@
 #include <osgDB/ReadFile>
+#include <osgDB/FileNameUtils>
+#include <osgDB/FileUtils>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdlib.h>
+
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+
+#include <iostream>
 
 static osg::Node* load_md3(const char* filename,
                            const osgDB::ReaderWriter::Options* options);
@@ -22,7 +33,7 @@ public:
 REGISTER_OSGPLUGIN(md3, ReaderWriterMD3);
 
 osgDB::ReaderWriter::ReadResult
-ReaderWriterMD2::readNode (const std::string& file,
+ReaderWriterMD3::readNode (const std::string& file,
                            const osgDB::ReaderWriter::Options* options) const
 {
     std::string ext = osgDB::getLowerCaseFileExtension(file);
@@ -53,7 +64,9 @@ typedef struct {
     int ofs_eof;
 } MD3_HEADER;
 
-#define MD3_HEADER_MAGIC  0x51806873 // "IDP3"
+#define MD3_HEADER_MAGIC 0x33504449 // "IDP3"
+// this one was wrong?: http://icculus.org/~phaethon/q3a/formats/md3format.html
+//#define MD3_HEADER_MAGIC  0x51806873
 
 // struct frame
 
@@ -68,6 +81,23 @@ typedef struct {
 // texcoord
 
 // vertex
+
+static void dumpHeaderInfo(MD3_HEADER* h)
+{
+    using namespace std;
+    //~ cout << " " << h-> << endl;
+    cout << "Ident: " << h->ident << endl;
+    cout << "Version: " << h->version << endl;
+    cout << "Name: " << h->name << endl;
+    cout << "Flags: " << h->flags << endl;
+    cout << "Num_frames: " << h->num_frames << endl;
+    cout << "Num_tags: " << h->num_tags << endl;
+    cout << "Num_surfaces: " << h->num_surfaces << endl;
+    cout << "Num_skins: " << h->num_skins << endl;
+    cout << "ofs_frames: " << h->ofs_frames << endl;
+    cout << "ofs_surfaces:" << h->ofs_surfaces << endl;
+    cout << "ofs_eof: " << h->ofs_eof << endl;
+}
 
 static osg::Node*
 load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
@@ -91,12 +121,13 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
     }
 
     MD3_HEADER* md3_header = (MD3_HEADER*)mapbase;
-    if(md3_header->magic != MD3_HEADER_MAGIC || md3_header->version < 15) {
-        munmap(mapbase);
+    if(md3_header->ident != MD3_HEADER_MAGIC || md3_header->version < 15) {
         free(mapbase);
         close(file_fd);
         return 0;
     }
+
+    dumpHeaderInfo(md3_header);
 
     free(mapbase);
     close(file_fd);
