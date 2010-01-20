@@ -42,12 +42,20 @@ ReaderWriterMD3::readNode (const std::string& file,
     std::string fileName = osgDB::findDataFile( file, options );
     if (fileName.empty()) return ReadResult::FILE_NOT_FOUND;
 
-    // code for setting up the database path so that internally referenced file are searched for on relative paths. 
+    // code for setting up the database path so that internally referenced file are searched for on relative paths.
     osg::ref_ptr<Options> local_opt = options ? static_cast<Options*>(options->clone(osg::CopyOp::SHALLOW_COPY)) : new Options;
     local_opt->setDatabasePath(osgDB::getFilePath(fileName));
 
     return load_md3(fileName.c_str(), options);
 }
+
+struct vec {
+    vec() : x(0.0f), y(0.0f), z(0.0f) {}
+    vec(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+    float x;
+    float y;
+    float z;
+};
 
 typedef struct {
     int ident;
@@ -68,19 +76,86 @@ typedef struct {
 // this one was wrong?: http://icculus.org/~phaethon/q3a/formats/md3format.html
 //#define MD3_HEADER_MAGIC  0x51806873
 
-// struct frame
+typedef struct {
+    vec bbmin;
+    vec bbmax;
+    vec origin;
+    float radius;
+    char name[16];
+} MD3_FRAME;
 
-// struct tag
+typedef struct {
+    char name[64];
+    vec origin;
+    float axis[3][3];
+} MD3_TAG;
 
-// struct surface
+typedef struct {
+    int ident;
+    char name[64];
+    int flags;
+    int num_frames;
+    int num_shaders;
+    int num_verts;
+    int num_triangles;
+    int ofs_triangles;
+    int ofs_shaders;
+    int ofs_st;
+    int ofs_xyznormal;
+    int ofs_end;
+} MD3_SURFACE;
 
-// struct shader
+typedef struct {
+    char name[64];
+    int shader_index;
+} MD3_SHADER;
 
-// struct triangle
+typedef struct {
+    int indexes[3];
+} MD3_TRIANGLE;
 
-// texcoord
+typedef struct {
+    float uv[2];
 
-// vertex
+    void dumpInfo() {
+        std::cout << uv[0] << " " << uv[1] << std::endl;
+    }
+} MD3_TEXCOORD;
+
+typedef struct {
+    signed short coord[3];
+    char normal[2];
+
+    void dumpInfo() {
+        printf("%d %d %d\n", coord[0], coord[1], coord[2]);
+    }
+} MD3_VERTEX;
+
+template<typename T>
+static void dp(const char* a, T& b)
+{
+    std::cout << a << ": " << b << std::endl;
+}
+
+static void dumpSurfaceInfo(MD3_SURFACE* s)
+{
+    using namespace std;
+    cout << "Surface--" << endl;
+    cout << "Ident: " << s->ident << endl;
+    cout << "name: " << s->name << endl;
+    cout << "flags " << s->flags << endl;
+    dp("frames", s->num_frames);
+    dp("shaders", s->num_shaders);
+    dp("verts", s->num_verts);
+    dp("triangles", s->num_triangles);
+    cout << "ofs_end " << s->ofs_end << endl;
+}
+
+static void dumpShaderInfo(MD3_SHADER* s)
+{
+    using namespace std;
+    cout << "-Shader " << s->shader_index << ": " << s->name << endl;
+}
 
 static void dumpHeaderInfo(MD3_HEADER* h)
 {
@@ -97,6 +172,11 @@ static void dumpHeaderInfo(MD3_HEADER* h)
     cout << "ofs_frames: " << h->ofs_frames << endl;
     cout << "ofs_surfaces:" << h->ofs_surfaces << endl;
     cout << "ofs_eof: " << h->ofs_eof << endl;
+}
+
+static void dumpTriangleInfo(MD3_TRIANGLE* t)
+{
+    printf("tri %d %d %d\n", t[0], t[1], t[2]);
 }
 
 static osg::Node*
@@ -127,7 +207,51 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
         return 0;
     }
 
-    dumpHeaderInfo(md3_header);
+    //~ dumpHeaderInfo(md3_header);
+
+    int surf_offset = 0;
+    for(int i = 0; i < md3_header->num_surfaces; ++i) {
+        MD3_SURFACE* md3_surface =
+            (MD3_SURFACE*) ((unsigned char*) mapbase + md3_header->ofs_surfaces + surf_offset);
+
+        /*MD3_VERTEX* md3_vertex =
+            (MD3_VERTEX*) md3_surface + md3_surface->ofs_xyznormal;
+        dumpVertexInfo(md3_vertex);*/
+        /*for(int j = 0; j < md3_surface->num_verts; ++j) {
+            MD3_VERTEX* md3_vertex =
+                (MD3_VERTEX*) md3_surface + md3_surface->ofs_xyznormal;
+
+        }*/
+
+        MD3_SHADER* md3_shaders =
+            (MD3_SHADER*) ((uint8_t*)md3_surface + md3_surface->ofs_shaders);
+
+        for(int j = 0; j < md3_surface->num_shaders; ++j) {
+            //~ dumpShaderInfo(&md3_shaders[j]);
+        }
+
+        uint8_t* uffe = (uint8_t*)md3_surface;
+
+        MD3_TRIANGLE* md3_triangles =
+            (MD3_TRIANGLE*) (uffe + md3_surface->ofs_triangles);
+        MD3_TEXCOORD* md3_texcoords =
+            (MD3_TEXCOORD*) (uffe + md3_surface->ofs_st);
+        MD3_VERTEX* md3_vertices =
+            (MD3_VERTEX*) (uffe + md3_surface->ofs_xyznormal);
+
+        for(int k = 0; k < md3_surface->num_triangles; ++k) {
+            //~ dumpTriangleInfo(&md3_triangles[k]);
+            //~ md3_texcoords[k].dumpInfo();
+        }
+
+        for(int k = 0; k < md3_surface->num_verts; ++k) {
+            //~ dumpTriangleInfo(&md3_triangles[k]);
+            md3_vertices[k].dumpInfo();
+        }
+
+        surf_offset += md3_surface->ofs_end;
+
+    }
 
     free(mapbase);
     close(file_fd);
