@@ -11,6 +11,9 @@
 
 #include <iostream>
 
+#define PI  (3.1415927f)
+#define PI2 (2*PI)
+
 static osg::Node* load_md3(const char* filename,
                            const osgDB::ReaderWriter::Options* options);
 
@@ -57,6 +60,12 @@ struct vec {
     float z;
 };
 
+template<typename T>
+static void dp(const char* a, T& b)
+{
+    std::cout << a << ": " << b << std::endl;
+}
+
 typedef struct {
     int ident;
     int version;
@@ -70,6 +79,22 @@ typedef struct {
     int ofs_tags;
     int ofs_surfaces;
     int ofs_eof;
+
+    void dumpInfo() {
+        printf("-Header-\n");
+        dp("ident", ident);
+        dp("version", version);
+        dp("name", name);
+        dp("flags", flags);
+        dp("frames", num_frames);
+        dp("tags", num_tags);
+        dp("surfaces", num_surfaces);
+        dp("skins", num_skins);
+        dp("ofs_frames", ofs_frames);
+        dp("ofs_tags", ofs_tags);
+        dp("ofs_surfaces", ofs_surfaces);
+        dp("ofs_eof", ofs_eof);
+    }
 } MD3_HEADER;
 
 #define MD3_HEADER_MAGIC 0x33504449 // "IDP3"
@@ -88,6 +113,11 @@ typedef struct {
     char name[64];
     vec origin;
     float axis[3][3];
+
+    void dumpInfo() {
+        std::cout << "tag " << name << std::endl;
+        printf("origin %4.2f %4.2f %4.2f\n", origin.x, origin.y, origin.z);
+    }
 } MD3_TAG;
 
 typedef struct {
@@ -124,18 +154,45 @@ typedef struct {
 
 typedef struct {
     signed short coord[3];
-    char normal[2];
+    short normal;
+
+    float posX() {
+        return coord[0]/64.f;
+    }
+
+    float posY() {
+        return coord[1]/64.f;
+    }
+
+    float posZ() {
+        return coord[2]/64.f;
+    }
+
+    float lng() {
+        return (normal & 0xFF) * PI2 / 255.0f;
+    }
+
+    float lat() {
+        return ((normal >> 8) & 0xFF) * PI2 / 255.0f;
+    }
+
+    float normX() {
+        return 0.f;
+    }
+
+    float normY() {
+        return 0.f;
+    }
+
+    float normZ() {
+        return 0.f;
+    }
 
     void dumpInfo() {
-        printf("%d %d %d\n", coord[0], coord[1], coord[2]);
+        printf("%1.1f %1.1f %1.1f | %1.1f %1.1f\n",
+               posX(), posY(), posZ(), lng(), lat());
     }
 } MD3_VERTEX;
-
-template<typename T>
-static void dp(const char* a, T& b)
-{
-    std::cout << a << ": " << b << std::endl;
-}
 
 static void dumpSurfaceInfo(MD3_SURFACE* s)
 {
@@ -155,23 +212,6 @@ static void dumpShaderInfo(MD3_SHADER* s)
 {
     using namespace std;
     cout << "-Shader " << s->shader_index << ": " << s->name << endl;
-}
-
-static void dumpHeaderInfo(MD3_HEADER* h)
-{
-    using namespace std;
-    //~ cout << " " << h-> << endl;
-    cout << "Ident: " << h->ident << endl;
-    cout << "Version: " << h->version << endl;
-    cout << "Name: " << h->name << endl;
-    cout << "Flags: " << h->flags << endl;
-    cout << "Num_frames: " << h->num_frames << endl;
-    cout << "Num_tags: " << h->num_tags << endl;
-    cout << "Num_surfaces: " << h->num_surfaces << endl;
-    cout << "Num_skins: " << h->num_skins << endl;
-    cout << "ofs_frames: " << h->ofs_frames << endl;
-    cout << "ofs_surfaces:" << h->ofs_surfaces << endl;
-    cout << "ofs_eof: " << h->ofs_eof << endl;
 }
 
 static void dumpTriangleInfo(MD3_TRIANGLE* t)
@@ -207,7 +247,13 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
         return 0;
     }
 
-    //~ dumpHeaderInfo(md3_header);
+    md3_header->dumpInfo();
+
+    MD3_TAG* md3_tags =
+        (MD3_TAG*) ((unsigned char*) mapbase + md3_header->ofs_tags);
+    for(int i = 0; i < md3_header->num_tags; ++i) {
+        md3_tags[i].dumpInfo();
+    }
 
     int surf_offset = 0;
     for(int i = 0; i < md3_header->num_surfaces; ++i) {
@@ -223,15 +269,10 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
 
         }*/
 
-        MD3_SHADER* md3_shaders =
-            (MD3_SHADER*) ((uint8_t*)md3_surface + md3_surface->ofs_shaders);
-
-        for(int j = 0; j < md3_surface->num_shaders; ++j) {
-            //~ dumpShaderInfo(&md3_shaders[j]);
-        }
-
         uint8_t* uffe = (uint8_t*)md3_surface;
 
+        MD3_SHADER* md3_shaders =
+            (MD3_SHADER*) (uffe + md3_surface->ofs_shaders);
         MD3_TRIANGLE* md3_triangles =
             (MD3_TRIANGLE*) (uffe + md3_surface->ofs_triangles);
         MD3_TEXCOORD* md3_texcoords =
@@ -239,13 +280,17 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
         MD3_VERTEX* md3_vertices =
             (MD3_VERTEX*) (uffe + md3_surface->ofs_xyznormal);
 
+
+        for(int j = 0; j < md3_surface->num_shaders; ++j) {
+            //~ dumpShaderInfo(&md3_shaders[j]);
+        }        
+
         for(int k = 0; k < md3_surface->num_triangles; ++k) {
             //~ dumpTriangleInfo(&md3_triangles[k]);
             //~ md3_texcoords[k].dumpInfo();
         }
 
         for(int k = 0; k < md3_surface->num_verts; ++k) {
-            //~ dumpTriangleInfo(&md3_triangles[k]);
             md3_vertices[k].dumpInfo();
         }
 
