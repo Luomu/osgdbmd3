@@ -1,6 +1,8 @@
 #include <osgDB/ReadFile>
 #include <osgDB/FileNameUtils>
 #include <osgDB/FileUtils>
+#include <osg/Geode>
+#include <osg/Texture2D>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -138,14 +140,26 @@ typedef struct {
 typedef struct {
     char name[64];
     int shader_index;
+
+    void dumpInfo() {
+        printf("Shader %d: %s\n", shader_index, name);
+    }
 } MD3_SHADER;
 
 typedef struct {
-    int indexes[3];
+    int indices[3];
 } MD3_TRIANGLE;
 
 typedef struct {
     float uv[2];
+
+    float u() {
+        return uv[0];
+    }
+
+    float v() {
+        return 1.f - uv[1];
+    }
 
     void dumpInfo() {
         std::cout << uv[0] << " " << uv[1] << std::endl;
@@ -177,20 +191,21 @@ typedef struct {
     }
 
     float normX() {
-        return 0.f;
+        return cosf(lat()) * sinf(lng());
     }
 
     float normY() {
-        return 0.f;
+        return sinf(lat()) * sinf(lng());
     }
 
     float normZ() {
-        return 0.f;
+        return cosf(lng());
     }
 
     void dumpInfo() {
-        printf("%1.1f %1.1f %1.1f | %1.1f %1.1f\n",
+        printf("%1.1f %1.1f %1.1f | %1.1f %1.1f | ",
                posX(), posY(), posZ(), lng(), lat());
+        printf("%1.1f %1.1f %1.1f\n", normX(), normY(), normZ()); 
     }
 } MD3_VERTEX;
 
@@ -208,12 +223,6 @@ static void dumpSurfaceInfo(MD3_SURFACE* s)
     cout << "ofs_end " << s->ofs_end << endl;
 }
 
-static void dumpShaderInfo(MD3_SHADER* s)
-{
-    using namespace std;
-    cout << "-Shader " << s->shader_index << ": " << s->name << endl;
-}
-
 static void dumpTriangleInfo(MD3_TRIANGLE* t)
 {
     printf("tri %d %d %d\n", t[0], t[1], t[2]);
@@ -225,7 +234,8 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
     struct stat st;
     void* mapbase;
     int file_fd;
-    osg::Node* result = 0;
+    osg::Geode* result = 0;
+    result = new osg::Geode;
 
     if(stat(filename, &st) < 0)
         return 0;
@@ -260,15 +270,6 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
         MD3_SURFACE* md3_surface =
             (MD3_SURFACE*) ((unsigned char*) mapbase + md3_header->ofs_surfaces + surf_offset);
 
-        /*MD3_VERTEX* md3_vertex =
-            (MD3_VERTEX*) md3_surface + md3_surface->ofs_xyznormal;
-        dumpVertexInfo(md3_vertex);*/
-        /*for(int j = 0; j < md3_surface->num_verts; ++j) {
-            MD3_VERTEX* md3_vertex =
-                (MD3_VERTEX*) md3_surface + md3_surface->ofs_xyznormal;
-
-        }*/
-
         uint8_t* uffe = (uint8_t*)md3_surface;
 
         MD3_SHADER* md3_shaders =
@@ -280,19 +281,72 @@ load_md3(const char* filename, const osgDB::ReaderWriter::Options* options)
         MD3_VERTEX* md3_vertices =
             (MD3_VERTEX*) (uffe + md3_surface->ofs_xyznormal);
 
+        std::vector<osg::Texture2D*> textures;
 
+        osg::ref_ptr<osg::Texture2D> skin_texture = 0;
         for(int j = 0; j < md3_surface->num_shaders; ++j) {
-            //~ dumpShaderInfo(&md3_shaders[j]);
-        }        
+            //~ md3_shaders[j].dumpInfo();
+            osg::ref_ptr<osg::Image> img;
+            osg::ref_ptr<osg::Texture2D> tex;
+            std::string imgname(md3_shaders[j].name);
+            img = osgDB::readRefImageFile(imgname, options);
+            if(img.valid()) {
+                tex = new osg::Texture2D;
+                tex->setImage(img);
+                skin_texture = tex.get();
+                textures.push_back(tex);
+                continue;
+            }
 
+            textures.push_back(0);
+            osg::notify(osg::WARN) << "MD3 loader: couldn't load texture " << imgname << std::endl;
+        }
+
+        osg::UIntArray* vertexIndices = new osg::UIntArray;
+        osg::UIntArray* normalIndices = new osg::UIntArray;
+        osg::Vec2Array* texCoords = new osg::Vec2Array;
         for(int k = 0; k < md3_surface->num_triangles; ++k) {
-            //~ dumpTriangleInfo(&md3_triangles[k]);
+            vertexIndices->push_back(md3_triangles[k].indices[0]);
+            vertexIndices->push_back(md3_triangles[k].indices[1]);
+            vertexIndices->push_back(md3_triangles[k].indices[2]);
+
+            normalIndices->push_back(md3_triangles[k].indices[0]);
+            normalIndices->push_back(md3_triangles[k].indices[1]);
+            normalIndices->push_back(md3_triangles[k].indices[2]);
+
             //~ md3_texcoords[k].dumpInfo();
+            texCoords->push_back(osg::Vec2(md3_texcoords[k].u(),
+                                           md3_texcoords[k].v()));
         }
 
+        osg::Geometry* geom = new osg::Geometry;
+        osg::Vec3Array* vertexCoords = new osg::Vec3Array;
+        osg::Vec3Array* normalCoords = new osg::Vec3Array;
         for(int k = 0; k < md3_surface->num_verts; ++k) {
-            md3_vertices[k].dumpInfo();
+            //~ md3_vertices[k].dumpInfo();
+            vertexCoords->push_back(osg::Vec3(md3_vertices[k].posX(),
+                                              md3_vertices[k].posY(),
+                                              md3_vertices[k].posZ()));
+
+            normalCoords->push_back(osg::Vec3(md3_vertices[k].normX(),
+                                              md3_vertices[k].normY(),
+                                              md3_vertices[k].normZ()));
         }
+
+        geom->setVertexArray(vertexCoords);
+        geom->setVertexIndices(vertexIndices);
+        geom->setTexCoordArray(0, texCoords);
+        geom->setTexCoordIndices(0, normalIndices);
+        geom->setNormalArray(normalCoords);
+        geom->setNormalIndices(normalIndices);
+        geom->setNormalBinding (osg::Geometry::BIND_PER_VERTEX);
+        geom->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::TRIANGLES,
+                              0, vertexIndices->size()));
+        result->addDrawable(geom);
+
+        osg::StateSet* state = new osg::StateSet;
+        state->setTextureAttributeAndModes(0, skin_texture.get(), osg::StateAttribute::ON);
+        geom->setStateSet(state);
 
         surf_offset += md3_surface->ofs_end;
 
